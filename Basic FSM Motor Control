@@ -1,0 +1,181 @@
+/*
+ * main.c
+ *
+ *  Created on: 2025 Nov 10 11:51:50
+ *  Author: 320296122
+ */
+
+//make the movement of motor forward and backward for 1 second using timer and use a while loop to check if both sensors are on or off.
+//when the movement stops at the extremes use a while loop that will keep on decrementing the count at the delay state. if count == 0 then
+//move the current state to move inward if open delay and move outward if closed delay.
+//also for motor forward and backward use a while loop that will keep on working until the sensors becomes on.
+//start timer outside it is not working.
+
+#include "DAVE.h"                 //Declarations from DAVE Code Generation (includes SFR declaration)
+
+/**
+
+ * @brief main() - Application entry point
+ *
+ * <b>Details of function</b><br>
+ * This routine is the application entry point. It is invoked by the device startup code. It is responsible for
+ * invoking the APP initialization dispatcher routine - DAVE_Init() and hosting the place-holder for user application
+ * code.
+ */
+
+
+void startTimer(void);
+void displayCycleCount(uint32_t);
+void displayMessage(char *c);
+
+typedef enum {
+    STATE_INWARD_DELAY,
+    STATE_MOVE_OUTWARD,
+    STATE_OUTWARD_DELAY,
+    STATE_MOVE_INWARD
+} TrayState;
+
+TrayState currentState = STATE_INWARD_DELAY;
+
+
+volatile bool timerExpired = false;
+volatile uint32_t cycle_count = 0;
+
+
+int main(void)
+{
+  DAVE_STATUS_t status;
+
+  status = DAVE_Init();           /* Initialization of DAVE APPs  */
+
+  if (status != DAVE_STATUS_SUCCESS)
+  {
+    /* Placeholder for error handler code. The while loop below can be replaced with an user error handler. */
+    XMC_DEBUG("DAVE APPs initialization failed\n");
+
+    while(1U)
+    {
+
+    }
+  }
+
+  PWM_Start(&PWM_0);
+  displayMessage("System Started");
+
+  /* Placeholder for user application code. The while loop below can be replaced with user application code. */
+  while(1U)
+  {
+	  switch (currentState) {
+	  	  	  	  case STATE_INWARD_DELAY:
+	  	  	  		  PWM_SetDutyCycle(&PWM_0, 0);
+	  	  	  		  if (!timerExpired)
+	  	  	  		  {
+	  	  	  	            currentState = STATE_MOVE_OUTWARD;
+	  	  	  	            startTimer();
+	  	  	  	      }
+
+	  	  	  		  break;
+
+	              case STATE_MOVE_OUTWARD: // Clockwise
+	                  DIGITAL_IO_SetOutputHigh(&DIR);
+	                  DIGITAL_IO_SetOutputHigh(&LED_1);
+	                  DIGITAL_IO_SetOutputLow(&LED_2);
+	                  PWM_SetDutyCycle(&PWM_0, 4000);
+	                  if (!timerExpired)
+	                  {
+					        currentState = STATE_OUTWARD_DELAY;
+					        startTimer();
+	                  }
+
+	                  break;
+
+	              case STATE_OUTWARD_DELAY: // Stop before anti-clockwise
+	            	  PWM_SetDutyCycle(&PWM_0, 0);
+
+	            	  if (!timerExpired)
+	            	  {
+	            	       currentState = STATE_MOVE_INWARD;
+	            	       startTimer();
+	            	  }
+
+	                  break;
+
+	              case STATE_MOVE_INWARD: // Anti-clockwise
+	                  DIGITAL_IO_SetOutputLow(&DIR);
+	                  DIGITAL_IO_SetOutputHigh(&LED_2);
+	                  DIGITAL_IO_SetOutputLow(&LED_1);
+	                  PWM_SetDutyCycle(&PWM_0, 4000);
+
+	                  if (!timerExpired)
+	                  {
+	                       currentState = STATE_INWARD_DELAY;
+	                       startTimer();
+	                  }
+
+	                  break;
+
+	          }
+  }
+}
+
+void Timer0_ISR_Handler(void)
+{
+	if(timerExpired)
+	{
+		timerExpired = false;
+
+		if (currentState == STATE_INWARD_DELAY)
+		{
+			cycle_count++;
+			displayMessage("Tray Stopped");
+			displayCycleCount(cycle_count);
+
+			displayMessage("---------------------------");
+
+		}
+
+		else if(currentState == STATE_MOVE_OUTWARD)
+		{
+			displayMessage("----------------------------");
+			displayMessage("Tray Automation Started");
+			displayMessage("Tray moving forward");
+		}
+
+		else if(currentState == STATE_OUTWARD_DELAY)
+		{
+			displayMessage("Tray Stopped");
+		}
+
+		else if(currentState == STATE_MOVE_INWARD)
+		{
+			displayMessage("Tray moving backward");
+		}
+
+		TIMER_Stop(&TIMER_0);
+	}
+
+}
+
+void startTimer(void)
+{
+	if(!timerExpired)
+	{
+		timerExpired = true;
+		TIMER_Start(&TIMER_0);
+	}
+}
+
+void displayCycleCount(uint32_t cycle_count)
+{
+	char buffer[50];
+
+	sprintf(buffer, "Cycle count = %d\r\n", cycle_count);
+	UART_Transmit(&UART_0, (uint32_t *)buffer, strlen(buffer));
+}
+
+void displayMessage(char *c)
+{
+	char buffer[50];
+	sprintf(buffer, "%s\r\n", c);
+	UART_Transmit(&UART_0, (uint32_t *)buffer, strlen(buffer));
+}
