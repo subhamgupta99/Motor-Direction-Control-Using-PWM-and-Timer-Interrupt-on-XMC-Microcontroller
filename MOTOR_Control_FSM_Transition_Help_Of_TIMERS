@@ -1,0 +1,224 @@
+/*
+ * main.c
+ *
+ *  Created on: 2025 Nov 08 21:43:26
+ *  Author: Subham Gupta
+ */
+
+
+
+
+#include "DAVE.h"                 //Declarations from DAVE Code Generation (includes SFR declaration)
+
+/**
+
+ * @brief main() - Application entry point
+ *
+ * <b>Details of function</b><br>
+ * This routine is the application entry point. It is invoked by the device startup code. It is responsible for
+ * invoking the APP initialization dispatcher routine - DAVE_Init() and hosting the place-holder for user application
+ * code.
+ */
+
+void startTimer(void);
+void displayMessage(char *);
+void displayCycleCount(uint32_t);
+
+typedef enum {
+	STATE_IDLE,
+	STATE_INWARD_DELAY,
+	STATE_MOVE_OUTWARD,
+	STATE_OUTWARD_DELAY,
+	STATE_MOVE_INWARD,
+	STATE_COUNT
+} TrayState;
+
+TrayState currentState = STATE_IDLE;
+
+
+volatile bool timerExpired = false;
+volatile uint32_t cycle_count = 0;
+
+
+// Flags to track delays
+volatile bool inwardDelayDone = false;
+volatile bool outwardDelayDone = false;
+
+
+
+int main(void)
+{
+  DAVE_STATUS_t status;
+
+  status = DAVE_Init();           /* Initialization of DAVE APPs  */
+
+
+  if (status != DAVE_STATUS_SUCCESS)
+  {
+    /* Placeholder for error handler code. The while loop below can be replaced with an user error handler. */
+    XMC_DEBUG("DAVE APPs initialization failed\n");
+
+    while(1U)
+    {
+
+    }
+  }
+
+  PWM_Start(&PWM_0);
+
+  displayMessage("Tray Automation started:");
+  displayMessage("-------------------------------");
+
+  /* Placeholder for user application code. The while loop below can be replaced with user application code. */
+  while(1U)
+  {
+	  volatile bool btnStatus1 = DIGITAL_IO_GetInput(&Button1);
+
+	  switch (currentState) {
+
+	  	  	  	  case STATE_IDLE:
+
+	  	  	  		  	if(btnStatus1==0)
+	  	  	  		  	{
+	  	  	  		  		displayMessage("Start button pressed. Beginning cycle...");
+	  	  	  		        currentState = STATE_INWARD_DELAY;
+	  	  	  		        startTimer();
+	  	  	  		  	}
+
+	  	  	  		  break;
+
+	  	  	  	  case STATE_INWARD_DELAY:
+	  	  	  		  PWM_SetDutyCycle(&PWM_0, 0);
+
+	  	  	  		  if (timerExpired)
+	  	  	  	      {
+	  	  	  			  timerExpired = false;
+	  	  	  			  inwardDelayDone = true;	//flag to make sure inward delay is done.
+	  	  	  			  currentState = STATE_MOVE_OUTWARD;
+	  	  	  			  startTimer();
+	  	  	  	      }
+
+	  	  	  		  break;
+
+	              case STATE_MOVE_OUTWARD: // Clockwise
+	                  DIGITAL_IO_SetOutputHigh(&DIR);
+	                  DIGITAL_IO_SetOutputHigh(&LED_1);
+	                  DIGITAL_IO_SetOutputLow(&LED_2);
+	                  PWM_SetDutyCycle(&PWM_0, 8000);
+
+	                  if (timerExpired)
+	                  {
+	                       timerExpired = false;
+	                       currentState = STATE_OUTWARD_DELAY;
+	                       startTimer();
+	                  }
+
+	                  break;
+
+	              case STATE_OUTWARD_DELAY: // Stop before anti-clockwise
+	                  PWM_SetDutyCycle(&PWM_0, 0);
+
+	                  if (timerExpired)
+	                  {
+	                     timerExpired = false;
+	                     outwardDelayDone = true; //flag to make sure outward delay is done.
+	                     currentState = STATE_MOVE_INWARD;
+	                     startTimer();
+	                  }
+
+	                  break;
+
+	              case STATE_MOVE_INWARD: // Anti-clockwise
+	                  DIGITAL_IO_SetOutputLow(&DIR);
+	                  DIGITAL_IO_SetOutputHigh(&LED_2);
+	                  DIGITAL_IO_SetOutputLow(&LED_1);
+	                  PWM_SetDutyCycle(&PWM_0, 8000);
+
+	                  if (timerExpired)
+	                  {
+	                      timerExpired = false;
+
+	                      if (inwardDelayDone && outwardDelayDone)
+	                      {
+	                            currentState = STATE_COUNT;
+	                      }
+	                      else
+	                      {
+	                            currentState = STATE_INWARD_DELAY;
+	                      }
+
+	                      startTimer();
+	                  }
+
+	                  break;
+
+	              case STATE_COUNT:
+	            	  if (timerExpired)
+	            	  {
+	            	  	  cycle_count++;
+	            	  	  displayCycleCount(cycle_count);
+
+
+	            	  	// Reset flags for next cycle
+	            	  	  inwardDelayDone = false;
+	            	  	  outwardDelayDone = false;
+
+
+	            	  	// Go back to inward delay for next cycle
+	            	  	  currentState = STATE_INWARD_DELAY;
+	            	  	  displayMessage("-------------------------");
+	            	  	  startTimer();
+	            	  }
+	            	  break;
+	          }
+  }
+}
+
+void Timer0Interval_ISR(void){
+	//jump here when the timer0 ends its interval
+		timerExpired = true;
+		TIMER_Stop(&TIMER0_INT);
+
+		if(currentState == STATE_INWARD_DELAY)
+		{
+			displayMessage("Inward delay");
+		}
+		else if(currentState == STATE_MOVE_OUTWARD)
+		{
+			displayMessage("Tray moving outward");
+		}
+		else if(currentState == STATE_OUTWARD_DELAY)
+		{
+			displayMessage("Outward delay");
+		}
+		else if(currentState == STATE_MOVE_INWARD)
+		{
+			displayMessage("Tray moving inward");
+		}
+}
+
+
+void startTimer(void)
+{
+		timerExpired = false;
+
+		TIMER_Stop(&TIMER0_INT);     // Ensure timer is stopped
+		TIMER_Clear(&TIMER0_INT);
+		TIMER_Start(&TIMER0_INT);
+
+}
+
+void displayMessage(char *c)
+{
+	char buffer[50];
+	sprintf(buffer, "%s\r\n", c);
+	UART_Transmit(&UART_0, (uint32_t *)buffer, strlen(buffer));
+}
+
+void displayCycleCount(uint32_t cycle_count)
+{
+	char buffer[50];
+
+	sprintf(buffer, "Cycle count = %d\r\n", cycle_count);
+	UART_Transmit(&UART_0, (uint32_t *)buffer, strlen(buffer));
+}
